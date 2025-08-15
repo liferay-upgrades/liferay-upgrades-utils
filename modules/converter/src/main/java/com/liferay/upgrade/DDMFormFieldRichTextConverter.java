@@ -19,6 +19,7 @@ import com.liferay.portal.kernel.json.JSONObject;
 import com.liferay.portal.kernel.log.Log;
 import com.liferay.portal.kernel.log.LogFactoryUtil;
 import com.liferay.portal.kernel.xml.Element;
+
 import com.liferay.upgrade.compare.DDMFieldAttributesComparator;
 import com.liferay.upgrade.helper.DDMFormFieldHelper;
 

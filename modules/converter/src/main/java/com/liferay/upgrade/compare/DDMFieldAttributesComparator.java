@@ -14,7 +14,7 @@ public class DDMFieldAttributesComparator {
         if (list1.size() != list2.size()) return false;
 
         for (int i = 0; i < list1.size(); i++) {
-            if (!deepCompare(list1.get(i), list2.get(i))) {
+            if (!_deepCompare(list1.get(i), list2.get(i))) {
                 return false;
             }
         }
@@ -22,7 +22,7 @@ public class DDMFieldAttributesComparator {
         return true;
     }
 
-    private static boolean deepCompare(DDMFormField f1, DDMFormField f2) {
+    private static boolean _deepCompare(DDMFormField f1, DDMFormField f2) {
         if (f1 == f2) return true;
         if (f1 == null || f2 == null) return false;
 
