@@ -1,0 +1,3 @@
+Bundle-Name: converter
+Bundle-SymbolicName: com.liferay.upgrade.converter
+Bundle-Version: 1.0.0
