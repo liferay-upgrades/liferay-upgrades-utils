@@ -5,7 +5,7 @@ import com.liferay.dynamic.data.mapping.model.DDMForm;
 import com.liferay.dynamic.data.mapping.model.DDMFormField;
 import com.liferay.dynamic.data.mapping.model.DDMStructure;
 import com.liferay.dynamic.data.mapping.service.DDMFieldLocalService;
-import com.liferay.dynamic.data.mapping.service.DDMStructureLocalServiceUtil;
+import com.liferay.dynamic.data.mapping.service.DDMStructureLocalService;
 import com.liferay.dynamic.data.mapping.storage.DDMFormFieldValue;
 import com.liferay.dynamic.data.mapping.storage.DDMFormValues;
 import com.liferay.journal.model.JournalArticle;
@@ -45,11 +45,12 @@ import org.osgi.service.component.annotations.Reference;
 )
 public class DDMFormFieldRichTextConverter {
 
-    public void convertTextFieldsToRichText() throws PortalException {
+    public void convertTextFieldsToRichText() {
         try {
-            List<JournalArticle> articles =
-                _journalArticleLocalService.getJournalArticles(
-                    QueryUtil.ALL_POS, QueryUtil.ALL_POS);
+            // Return every web content, it seems bad, maybe by group is the ideal
+
+            List<JournalArticle> articles = _journalArticleLocalService.getJournalArticles(
+                QueryUtil.ALL_POS, QueryUtil.ALL_POS);
 
             for (JournalArticle article : articles) {
                 DDMFormValues ddmFormValues = article.getDDMFormValues();
@@ -69,8 +70,7 @@ public class DDMFormFieldRichTextConverter {
                 if (!DDMFieldAttributesComparator.compare(
                         originalDDMFormFields, convertedDDMFormFields)) {
 
-                    Set<Locale> originalAvailableLocales =
-                        ddmFormValues.getAvailableLocales();
+                    Set<Locale> originalAvailableLocales = ddmFormValues.getAvailableLocales();
 
                     Locale originalDefaultLocale = ddmFormValues.getDefaultLocale();
 
@@ -103,7 +103,7 @@ public class DDMFormFieldRichTextConverter {
                     _log.info(sb.toString());
                 }
 
-                _log.info("Converted DDM Form fields to RichText");
+                _log.info("Converter DDM Form fields to RichText finished.");
             }
         }
         catch (Exception exception) {
@@ -111,69 +111,20 @@ public class DDMFormFieldRichTextConverter {
         }
     }
 
-    private List<DDMFormField> _updateFormFieldsFromElement(
-        List<DDMFormField> ddmFormFields, Element element) throws PortalException {
+    private boolean _containsHtmlContent(Element element) {
+        List<Element> dynamicContents = element.elements("dynamic-content");
 
-        try {
-            _convertNestedTextFieldsToRichText(element, ddmFormFields);
+        for (Element dynamicContentElement : dynamicContents) {
+            String data = dynamicContentElement.getText();
 
-            return ddmFormFields;
-        }
-        catch (RuntimeException runtimeException) {
-            throw new PortalException(runtimeException);
-        }
-    }
+            Matcher matcher = Pattern.compile("<[^>]+?/?>").matcher(data);
 
-    private void _updateStructureDefinitionFromFields(
-            List<DDMFormField> ddmFormFields, DDMStructure ddmStructure)
-        throws PortalException {
-
-        String definition = ddmStructure.getDefinition();
-
-        JSONObject json = JSONFactoryUtil.createJSONObject(definition);
-
-        JSONArray fields = json.getJSONArray("fields");
-
-        _updateFields(ddmFormFields, fields);
-
-        ddmStructure.setDefinition(json.toString());
-
-        DDMStructureLocalServiceUtil.updateDDMStructure(ddmStructure);
-    }
-
-    private void _updateFields(
-        List<DDMFormField> ddmFormFields, JSONArray fieldsArray) {
-
-        for (int i = 0; i < fieldsArray.length(); i++) {
-            JSONObject field = fieldsArray.getJSONObject(i);
-
-            String name = field.getString("name");
-            String type = field.getString("type");
-
-            for (DDMFormField ddmFormField : ddmFormFields) {
-                if (ddmFormField.getName().equals(name) &&
-                        !ddmFormField.getType().equals(type)) {
-
-                    field.put("type", ddmFormField.getType());
-                }
-            }
-
-            if (field.has("nestedFields")) {
-                JSONArray nestedFields = field.getJSONArray("nestedFields");
-
-                DDMFormField nestedDDMFormField = ddmFormFields.stream()
-                    .filter(f -> f.getName().equals(name))
-                    .findFirst()
-                    .orElse(null);
-
-                if (nestedFields.length() > 0) {
-                    List<DDMFormField> nestedDDMFormFields = nestedDDMFormField != null ?
-                        nestedDDMFormField.getNestedDDMFormFields() : new ArrayList<>();
-
-                    _updateFields(nestedDDMFormFields, nestedFields);
-                }
+            if (matcher.find()) {
+                return true;
             }
         }
+
+        return false;
     }
 
     private void _convertNestedTextFieldsToRichText(
@@ -208,24 +159,75 @@ public class DDMFormFieldRichTextConverter {
         }
     }
 
-    private boolean _containsHtmlContent(Element element) {
-        List<Element> dynamicContents = element.elements("dynamic-content");
+    private List<DDMFormField> _updateFormFieldsFromElement(
+        List<DDMFormField> ddmFormFields, Element element) throws PortalException {
 
-        for (Element dynamicContentElement : dynamicContents) {
-            String data = dynamicContentElement.getText();
+        try {
+            _convertNestedTextFieldsToRichText(element, ddmFormFields);
 
-            Matcher matcher = Pattern.compile("<[^>]+?/?>").matcher(data);
+            return ddmFormFields;
+        }
+        catch (RuntimeException runtimeException) {
+            throw new PortalException(runtimeException);
+        }
+    }
 
-            if (matcher.find()) {
-                return true;
+    private void _updateStructureDefinitionFromFields(
+            List<DDMFormField> ddmFormFields, DDMStructure ddmStructure)
+        throws PortalException {
+
+        String definition = ddmStructure.getDefinition();
+
+        JSONObject json = JSONFactoryUtil.createJSONObject(definition);
+
+        JSONArray fields = json.getJSONArray("fields");
+
+        _updateFieldsDefinition(ddmFormFields, fields);
+
+        ddmStructure.setDefinition(json.toString());
+
+        _ddmStructureLocalService.updateDDMStructure(ddmStructure);
+    }
+
+    private void _updateFieldsDefinition(
+        List<DDMFormField> ddmFormFields, JSONArray fieldsArray) {
+
+        for (int i = 0; i < fieldsArray.length(); i++) {
+            JSONObject field = fieldsArray.getJSONObject(i);
+
+            String name = field.getString("name");
+            String type = field.getString("type");
+
+            for (DDMFormField ddmFormField : ddmFormFields) {
+                if (ddmFormField.getName().equals(name) &&
+                        !ddmFormField.getType().equals(type)) {
+
+                    field.put("type", ddmFormField.getType());
+                }
+            }
+
+            if (field.has("nestedFields")) {
+                JSONArray nestedFields = field.getJSONArray("nestedFields");
+
+                if (nestedFields.length() > 0) {
+                    DDMFormField nestedDDMFormField = ddmFormFields.stream()
+                        .filter(f -> f.getName().equals(name))
+                        .findFirst()
+                        .orElse(null);
+
+                    List<DDMFormField> nestedDDMFormFields = nestedDDMFormField != null ?
+                        nestedDDMFormField.getNestedDDMFormFields() : new ArrayList<>();
+
+                    _updateFieldsDefinition(nestedDDMFormFields, nestedFields);
+                }
             }
         }
-
-        return false;
     }
 
     @Reference
     private DDMFieldLocalService _ddmFieldLocalService;
+    @Reference
+    private DDMStructureLocalService _ddmStructureLocalService;
     @Reference
     private JournalArticleLocalService _journalArticleLocalService;
 
