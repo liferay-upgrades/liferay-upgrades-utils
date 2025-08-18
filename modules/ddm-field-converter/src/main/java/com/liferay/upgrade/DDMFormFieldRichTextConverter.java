@@ -4,8 +4,10 @@ import com.liferay.dynamic.data.mapping.form.field.type.constants.DDMFormFieldTy
 import com.liferay.dynamic.data.mapping.model.DDMForm;
 import com.liferay.dynamic.data.mapping.model.DDMFormField;
 import com.liferay.dynamic.data.mapping.model.DDMStructure;
+import com.liferay.dynamic.data.mapping.model.DDMStructureVersion;
 import com.liferay.dynamic.data.mapping.service.DDMFieldLocalService;
 import com.liferay.dynamic.data.mapping.service.DDMStructureLocalService;
+import com.liferay.dynamic.data.mapping.service.DDMStructureVersionLocalService;
 import com.liferay.dynamic.data.mapping.storage.DDMFormFieldValue;
 import com.liferay.dynamic.data.mapping.storage.DDMFormValues;
 import com.liferay.journal.model.JournalArticle;
@@ -159,36 +161,6 @@ public class DDMFormFieldRichTextConverter {
         }
     }
 
-    private List<DDMFormField> _updateFormFieldsFromElement(
-        List<DDMFormField> ddmFormFields, Element element) throws PortalException {
-
-        try {
-            _convertNestedTextFieldsToRichText(element, ddmFormFields);
-
-            return ddmFormFields;
-        }
-        catch (RuntimeException runtimeException) {
-            throw new PortalException(runtimeException);
-        }
-    }
-
-    private void _updateStructureDefinitionFromFields(
-            List<DDMFormField> ddmFormFields, DDMStructure ddmStructure)
-        throws PortalException {
-
-        String definition = ddmStructure.getDefinition();
-
-        JSONObject json = JSONFactoryUtil.createJSONObject(definition);
-
-        JSONArray fields = json.getJSONArray("fields");
-
-        _updateFieldsDefinition(ddmFormFields, fields);
-
-        ddmStructure.setDefinition(json.toString());
-
-        _ddmStructureLocalService.updateDDMStructure(ddmStructure);
-    }
-
     private void _updateFieldsDefinition(
         List<DDMFormField> ddmFormFields, JSONArray fieldsArray) {
 
@@ -224,10 +196,50 @@ public class DDMFormFieldRichTextConverter {
         }
     }
 
+    private List<DDMFormField> _updateFormFieldsFromElement(
+        List<DDMFormField> ddmFormFields, Element element) throws PortalException {
+
+        try {
+            _convertNestedTextFieldsToRichText(element, ddmFormFields);
+
+            return ddmFormFields;
+        }
+        catch (RuntimeException runtimeException) {
+            throw new PortalException(runtimeException);
+        }
+    }
+
+    private void _updateStructureDefinitionFromFields(
+            List<DDMFormField> ddmFormFields, DDMStructure ddmStructure)
+        throws PortalException {
+
+        String definition = ddmStructure.getDefinition();
+
+        JSONObject json = JSONFactoryUtil.createJSONObject(definition);
+
+        JSONArray fields = json.getJSONArray("fields");
+
+        _updateFieldsDefinition(ddmFormFields, fields);
+
+        ddmStructure.setDefinition(json.toString());
+
+        _ddmStructureLocalService.updateDDMStructure(ddmStructure);
+
+        DDMStructureVersion ddmStructureVersion =
+            ddmStructure.getLatestStructureVersion();
+
+        ddmStructureVersion.setDefinition(ddmStructure.getDefinition());
+
+        _ddmStructureVersionLocalService.updateDDMStructureVersion(
+            ddmStructureVersion);
+    }
+
     @Reference
     private DDMFieldLocalService _ddmFieldLocalService;
     @Reference
     private DDMStructureLocalService _ddmStructureLocalService;
+    @Reference
+    private DDMStructureVersionLocalService _ddmStructureVersionLocalService;
     @Reference
     private JournalArticleLocalService _journalArticleLocalService;
 
