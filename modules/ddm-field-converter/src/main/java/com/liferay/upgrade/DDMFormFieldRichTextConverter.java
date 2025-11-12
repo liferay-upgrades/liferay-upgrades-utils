@@ -13,7 +13,6 @@ import com.liferay.dynamic.data.mapping.storage.DDMFormValues;
 import com.liferay.journal.model.JournalArticle;
 import com.liferay.journal.service.JournalArticleLocalService;
 import com.liferay.petra.string.StringBundler;
-import com.liferay.portal.kernel.dao.orm.QueryUtil;
 import com.liferay.portal.kernel.exception.PortalException;
 import com.liferay.portal.kernel.json.JSONArray;
 import com.liferay.portal.kernel.json.JSONFactoryUtil;
@@ -39,74 +38,154 @@ import org.osgi.service.component.annotations.Reference;
  * @author Albert Gomes Cabral
  */
 @Component(
-    property = {
-        "osgi.command.function=convertTextFieldsToRichText",
-        "osgi.command.scope=upgrade-utils"
-    },
-    service = DDMFormFieldRichTextConverter.class
+        property = {
+                "osgi.command.function=convertTextFieldsToRichText",
+                "osgi.command.scope=upgrade-utils"
+        },
+        service = DDMFormFieldRichTextConverter.class
 )
 public class DDMFormFieldRichTextConverter {
 
     public void convertTextFieldsToRichText() {
+        int journalArticlesCount = _journalArticleLocalService.getJournalArticlesCount();
+
+        convertTextFieldsToRichText(START_OF_PAGE, PAGE_SIZE, journalArticlesCount);
+    }
+
+    public void convertTextFieldsToRichText(int start, int limit) {
+
+        if (limit < 0 || start >= limit) {
+            throw  new RuntimeException("Limit can not be less than zero or start can not be grater or equals than limit");
+        }
+
+        convertTextFieldsToRichText(START_OF_PAGE, PAGE_SIZE, limit);
+    }
+
+    public void convertTextFieldsToRichText(int start, int pageSize, int limit) {
+        convertTextFieldsToRichText(start, pageSize, limit, 0, 0, "DEFAULT");
+    }
+
+    private void convertTextFieldsToRichText(int start, int pageSize, int limit, long groupId, long folderId, String option) {
         try {
-            // Return every web content, it seems bad, maybe by group is the ideal
 
-            List<JournalArticle> articles = _journalArticleLocalService.getJournalArticles(
-                QueryUtil.ALL_POS, QueryUtil.ALL_POS);
+            if (start < 0 || pageSize <= 0 || start >= limit) {
+                throw  new RuntimeException("Start can not be less than zero or pageSize can not be less or equals " +
+                        "than zero");
+            }
 
-            for (JournalArticle article : articles) {
-                DDMFormValues ddmFormValues = article.getDDMFormValues();
+            for (; start < limit; start += pageSize) {
 
-                DDMForm ddmForm = ddmFormValues.getDDMForm();
+                int end = Math.min(start + pageSize, limit);
 
-                List<DDMFormField> ddmFormFields = ddmForm.getDDMFormFields();
+                List<JournalArticle> journalArticles = getJournalArticles(start, end, groupId, folderId, option);
 
-                List<DDMFormField> originalDDMFormFields = DDMFormFieldHelper.clone(
+                journalArticles.forEach(this::convertDDMFormToRichText);
+
+                System.out.printf("%d files converted from DDMForm to RichText of a total of %d - start: %d \n",
+                        (start + journalArticles.size()), limit, start);
+            }
+        }
+        catch (Exception exception) {
+            _log.error(exception.getMessage(), exception);
+        }
+    }
+
+    private List<JournalArticle> getJournalArticles(int start, int end, long groupId, long folderId, String option) {
+        return switch (option) {
+            case "DEFAULT" -> _journalArticleLocalService.getJournalArticles(start, end);
+            case "GROUP_ID" -> _journalArticleLocalService.getArticles(groupId, start, end);
+            case "GROUP_ID_AND_FOLDER_ID" -> _journalArticleLocalService.getArticles(groupId, folderId, start, end);
+            default -> new ArrayList<>();
+        };
+    }
+
+    public void convertTextFieldsToRichText(long articleID) {
+        try {
+            JournalArticle journalArticle = _journalArticleLocalService.getJournalArticle(articleID);
+            convertDDMFormToRichText(journalArticle);
+            System.out.println("Converter DDM Form fields to RichText finished.");
+        } catch (Exception exception) {
+            _log.error(exception.getMessage(), exception);
+        }
+    }
+
+    public void convertTextFieldsToRichText(String groupId) {
+        try {
+            long groupIdTemp = Long.parseLong(groupId);
+
+            int articlesCount = _journalArticleLocalService.getArticlesCount(groupIdTemp);
+
+            convertTextFieldsToRichText(START_OF_PAGE, PAGE_SIZE, articlesCount, groupIdTemp, 0, "GROUP_ID");
+        } catch (Exception exception) {
+            _log.error(exception.getMessage(), exception);
+        }
+    }
+
+    public void convertTextFieldsToRichText(String groupId, String folderId) {
+        try {
+            long groupIdTemp = Long.parseLong(groupId);
+            long folderIdTemp = Long.parseLong(folderId);
+
+            int articlesCount = _journalArticleLocalService.getArticlesCount(groupIdTemp, folderIdTemp);
+
+            convertTextFieldsToRichText(START_OF_PAGE, PAGE_SIZE, articlesCount, groupIdTemp, folderIdTemp, "GROUP_ID_AND_FOLDER_ID");
+        } catch (Exception exception) {
+            _log.error(exception.getMessage(), exception);
+        }
+    }
+
+    private void convertDDMFormToRichText(JournalArticle article) {
+        try {
+            DDMFormValues ddmFormValues = article.getDDMFormValues();
+
+            DDMForm ddmForm = ddmFormValues.getDDMForm();
+
+            List<DDMFormField> ddmFormFields = ddmForm.getDDMFormFields();
+
+            List<DDMFormField> originalDDMFormFields = DDMFormFieldHelper.clone(
                     ddmFormFields);
 
-                Element rootElement = article.getDocument().getRootElement();
+            Element rootElement = article.getDocument().getRootElement();
 
-                List<DDMFormField> convertedDDMFormFields = _updateFormFieldsFromElement(
+            List<DDMFormField> convertedDDMFormFields = _updateFormFieldsFromElement(
                     ddmFormFields, rootElement);
 
-                if (!DDMFieldAttributesComparator.compare(
-                        originalDDMFormFields, convertedDDMFormFields)) {
+            if (!DDMFieldAttributesComparator.compare(
+                    originalDDMFormFields, convertedDDMFormFields)) {
 
-                    Set<Locale> originalAvailableLocales = ddmFormValues.getAvailableLocales();
+                Set<Locale> originalAvailableLocales = ddmFormValues.getAvailableLocales();
 
-                    Locale originalDefaultLocale = ddmFormValues.getDefaultLocale();
+                Locale originalDefaultLocale = ddmFormValues.getDefaultLocale();
 
-                    List<DDMFormFieldValue> originalDDMFormFieldValues =
+                List<DDMFormFieldValue> originalDDMFormFieldValues =
                         ddmFormValues.getDDMFormFieldValues();
 
-                    ddmForm.setDDMFormFields(convertedDDMFormFields);
+                ddmForm.setDDMFormFields(convertedDDMFormFields);
 
-                    ddmFormValues = new DDMFormValues(ddmForm);
+                ddmFormValues = new DDMFormValues(ddmForm);
 
-                    ddmFormValues.setAvailableLocales(originalAvailableLocales);
-                    ddmFormValues.setDefaultLocale(originalDefaultLocale);
-                    ddmFormValues.setDDMFormFieldValues(originalDDMFormFieldValues);
+                ddmFormValues.setAvailableLocales(originalAvailableLocales);
+                ddmFormValues.setDefaultLocale(originalDefaultLocale);
+                ddmFormValues.setDDMFormFieldValues(originalDDMFormFieldValues);
 
-                    DDMStructure ddmStructure = article.getDDMStructure();
+                DDMStructure ddmStructure = article.getDDMStructure();
 
-                    _ddmFieldLocalService.updateDDMFormValues(
+                _ddmFieldLocalService.updateDDMFormValues(
                         ddmStructure.getStructureId(), article.getId(),
                         ddmFormValues);
 
-                    _updateStructureDefinitionFromFields(
+                _updateStructureDefinitionFromFields(
                         convertedDDMFormFields, ddmStructure);
 
-                    StringBundler sb = new StringBundler();
+                StringBundler sb = new StringBundler();
 
-                    sb.append("Updated article").append(System.lineSeparator());
-                    sb.append(article.getTitle()).append(System.lineSeparator());
-                    sb.append("with id ").append(article.getId());
+                sb.append("Updated article").append(System.lineSeparator());
+                sb.append(article.getTitle()).append(System.lineSeparator());
+                sb.append("with id ").append(article.getId());
 
-                    _log.info(sb.toString());
-                }
-
-                _log.info("Converter DDM Form fields to RichText finished.");
+                _log.info(sb.toString());
             }
+            _log.info("Converter DDM Form fields to RichText finished.");
         }
         catch (Exception exception) {
             _log.error(exception.getMessage(), exception);
@@ -130,7 +209,7 @@ public class DDMFormFieldRichTextConverter {
     }
 
     private void _convertNestedTextFieldsToRichText(
-        Element parentElement, List<DDMFormField> ddmFormFields) {
+            Element parentElement, List<DDMFormField> ddmFormFields) {
 
         if (parentElement == null) {
             return;
@@ -150,7 +229,7 @@ public class DDMFormFieldRichTextConverter {
 
                 if (type.equals(DDMFormFieldTypeConstants.FIELDSET)) {
                     _convertNestedTextFieldsToRichText(
-                        dynamicElementElement, ddmFormField.getNestedDDMFormFields());
+                            dynamicElementElement, ddmFormField.getNestedDDMFormFields());
                 }
                 else if (type.equals(DDMFormFieldTypeConstants.TEXT)) {
                     if (_containsHtmlContent(dynamicElementElement)) {
@@ -162,7 +241,7 @@ public class DDMFormFieldRichTextConverter {
     }
 
     private void _updateFieldsDefinition(
-        List<DDMFormField> ddmFormFields, JSONArray fieldsArray) {
+            List<DDMFormField> ddmFormFields, JSONArray fieldsArray) {
 
         for (int i = 0; i < fieldsArray.length(); i++) {
             JSONObject field = fieldsArray.getJSONObject(i);
@@ -183,12 +262,12 @@ public class DDMFormFieldRichTextConverter {
 
                 if (nestedFields.length() > 0) {
                     DDMFormField nestedDDMFormField = ddmFormFields.stream()
-                        .filter(f -> f.getName().equals(name))
-                        .findFirst()
-                        .orElse(null);
+                            .filter(f -> f.getName().equals(name))
+                            .findFirst()
+                            .orElse(null);
 
                     List<DDMFormField> nestedDDMFormFields = nestedDDMFormField != null ?
-                        nestedDDMFormField.getNestedDDMFormFields() : new ArrayList<>();
+                            nestedDDMFormField.getNestedDDMFormFields() : new ArrayList<>();
 
                     _updateFieldsDefinition(nestedDDMFormFields, nestedFields);
                 }
@@ -197,7 +276,7 @@ public class DDMFormFieldRichTextConverter {
     }
 
     private List<DDMFormField> _updateFormFieldsFromElement(
-        List<DDMFormField> ddmFormFields, Element element) throws PortalException {
+            List<DDMFormField> ddmFormFields, Element element) throws PortalException {
 
         try {
             _convertNestedTextFieldsToRichText(element, ddmFormFields);
@@ -211,7 +290,7 @@ public class DDMFormFieldRichTextConverter {
 
     private void _updateStructureDefinitionFromFields(
             List<DDMFormField> ddmFormFields, DDMStructure ddmStructure)
-        throws PortalException {
+            throws PortalException {
 
         String definition = ddmStructure.getDefinition();
 
@@ -226,12 +305,12 @@ public class DDMFormFieldRichTextConverter {
         _ddmStructureLocalService.updateDDMStructure(ddmStructure);
 
         DDMStructureVersion ddmStructureVersion =
-            ddmStructure.getLatestStructureVersion();
+                ddmStructure.getLatestStructureVersion();
 
         ddmStructureVersion.setDefinition(ddmStructure.getDefinition());
 
         _ddmStructureVersionLocalService.updateDDMStructureVersion(
-            ddmStructureVersion);
+                ddmStructureVersion);
     }
 
     @Reference
@@ -244,5 +323,7 @@ public class DDMFormFieldRichTextConverter {
     private JournalArticleLocalService _journalArticleLocalService;
 
     private static final Log _log = LogFactoryUtil.getLog(DDMFormFieldRichTextConverter.class);
+    private static final int START_OF_PAGE = 0;
+    private static final int PAGE_SIZE = 10_000;
 
 }
