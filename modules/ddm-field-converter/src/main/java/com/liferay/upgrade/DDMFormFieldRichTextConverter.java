@@ -198,7 +198,7 @@ public class DDMFormFieldRichTextConverter {
         for (Element dynamicContentElement : dynamicContents) {
             String data = dynamicContentElement.getText();
 
-            Matcher matcher = Pattern.compile("<[^>]+?/?>").matcher(data);
+            Matcher matcher = Pattern.compile("<[^>]+?/?>|&(nbsp|amp|gt|lt|quot|apos)\\b;?|&#[0-9]+\\b;?", Pattern.CASE_INSENSITIVE).matcher(data);
 
             if (matcher.find()) {
                 return true;
